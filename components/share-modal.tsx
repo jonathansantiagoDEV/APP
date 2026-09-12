@@ -1,0 +1,270 @@
+'use client'
+
+import { Download, Mail, MessageCircle, Share2, X } from 'lucide-react'
+import type { DateFormat, ServiceRecord } from '@/lib/types'
+import { formatDateStr } from '@/lib/types'
+import { generatePDFBlob, pdfFileName } from '@/lib/pdf'
+import { getWorkshopProfile } from '@/lib/workshop-profile'
+import { useToast } from './toast'
+
+interface ShareModalProps {
+  record: ServiceRecord | null
+  onClose: () => void
+  dateFormat?: DateFormat
+}
+
+function buildMessage(record: ServiceRecord, dateFormat: DateFormat): string {
+  const lines = [
+    '*AUTOSERVIÇOS*',
+    '',
+    `*Cliente:* ${record.clientName || '---'}`,
+  ]
+
+  if (record.plate) lines.push(`*Placa:* ${record.plate}`)
+  if (record.price) lines.push(`*Preço:* ${record.price}`)
+
+  if (record.schedule) {
+    lines.push(
+      `*Agendamento:* ${formatDateStr(record.schedule, dateFormat)} às ${record.scheduleTime || '--:--'}`,
+    )
+  }
+
+  lines.push('', '*Descrição:*', record.noteText || 'Sem descrição')
+
+  return lines.join('\n')
+}
+
+export function ShareModal({ record, onClose, dateFormat = 'dd/mm/yyyy' }: ShareModalProps) {
+
+  const showToast = useToast()
+
+  if (!record) return null
+
+
+  async function downloadPDF() {
+    try {
+
+      const profile = await getWorkshopProfile()
+
+      const blob = await generatePDFBlob(record, profile)
+
+      const url = URL.createObjectURL(blob)
+
+      const a = document.createElement('a')
+
+      a.href = url
+      a.download = pdfFileName(record)
+
+      document.body.appendChild(a)
+
+      a.click()
+
+      a.remove()
+
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+
+      showToast('✅ PDF baixado!', 'success')
+
+      onClose()
+
+    } catch {
+
+      showToast('❌ Erro ao gerar PDF', 'error')
+
+    }
+  }
+
+
+  async function shareWhatsApp() {
+
+    try {
+
+      const profile = await getWorkshopProfile()
+
+      const blob = await generatePDFBlob(record, profile)
+
+      const file = new File(
+        [blob],
+        pdfFileName(record),
+        { type: 'application/pdf' }
+      )
+
+
+      const nav = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean
+      }
+
+
+      if (
+        nav.share &&
+        nav.canShare &&
+        nav.canShare({ files: [file] })
+      ) {
+
+        await nav.share({
+          files: [file],
+          title: 'Autoserviços',
+          text: buildMessage(record, dateFormat)
+        })
+
+        onClose()
+
+        return
+      }
+
+    } catch {
+
+      return
+
+    }
+
+
+    showToast(
+      '📄 PDF baixado! Anexe o arquivo na conversa do WhatsApp',
+      'info'
+    )
+
+    downloadPDF()
+
+
+    const text = encodeURIComponent(
+      buildMessage(record, dateFormat)
+    )
+
+    window.open(
+      `https://wa.me/?text=${text}`,
+      '_blank'
+    )
+
+  }
+
+
+  function shareEmail() {
+
+    const subject = encodeURIComponent(
+      `Autoserviços - ${record.clientName || 'Documento'}`
+    )
+
+    const body = encodeURIComponent(
+      buildMessage(record, dateFormat).replace(/\*/g, '')
+    )
+
+    window.location.href =
+      `mailto:?subject=${subject}&body=${body}`
+
+    onClose()
+
+  }
+
+
+  async function shareSystem() {
+
+    try {
+
+      const profile = await getWorkshopProfile()
+
+      const blob = await generatePDFBlob(record, profile)
+
+      const file = new File(
+        [blob],
+        pdfFileName(record),
+        { type: 'application/pdf' }
+      )
+
+
+      const nav = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean
+      }
+
+
+      if (
+        nav.share &&
+        nav.canShare &&
+        nav.canShare({ files: [file] })
+      ) {
+
+        await nav.share({
+          files: [file],
+          title: 'Autoserviços',
+          text: buildMessage(record, dateFormat)
+        })
+
+        onClose()
+
+      } else {
+
+        showToast(
+          '📄 PDF baixado! Anexe o arquivo na conversa do WhatsApp',
+          'info'
+        )
+
+        downloadPDF()
+
+      }
+
+
+    } catch {
+
+    }
+
+  }
+
+
+  const options = [
+    { label: 'WhatsApp', icon: MessageCircle, action: shareWhatsApp, cls: 'bg-whatsapp text-white' },
+    { label: 'E-mail', icon: Mail, action: shareEmail, cls: 'bg-primary text-primary-foreground' },
+    { label: 'Compartilhar', icon: Share2, action: shareSystem, cls: 'bg-foreground text-background' },
+    { label: 'Baixar PDF', icon: Download, action: downloadPDF, cls: 'border border-border bg-background text-foreground' },
+  ]
+
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[4500] flex items-end justify-center bg-black/50 sm:items-center">
+
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="animate-fade-up w-full max-w-[480px] rounded-t-2xl bg-card p-4 sm:rounded-2xl"
+      >
+
+        <div className="mb-3 flex items-center justify-between">
+
+          <h2 className="text-lg font-bold text-foreground">
+            Compartilhar
+          </h2>
+
+          <button
+            aria-label="Fechar"
+            onClick={onClose}
+            className="rounded-full p-1 text-muted-foreground hover:bg-background"
+          >
+            <X className="size-5" />
+          </button>
+
+        </div>
+
+
+        <div className="grid grid-cols-2 gap-2.5">
+
+          {options.map((o) => (
+
+            <button
+              key={o.label}
+              onClick={o.action}
+              className={`flex flex-col items-center gap-1.5 rounded-xl px-3 py-4 text-sm font-bold transition hover:opacity-90 ${o.cls}`}
+            >
+
+              <o.icon className="size-6" />
+
+              {o.label}
+
+            </button>
+
+          ))}
+
+        </div>
+
+      </div>
+
+    </div>
+  )
+}
